@@ -6,24 +6,27 @@ provider "aws" {
 # VPC and subnets
 #####
 data "aws_vpc" "default" {
-  default = true
+  default = false
 }
-
-data "aws_subnet_ids" "all" {
-  vpc_id = data.aws_vpc.default.id
+# data.aws_vpc.default.id
+data "aws_subnets" "all" {
+  filter {
+    name   = "vpc-id"
+    values = ["vpc-064249f3d96c56deb"]
+  }
 }
 
 #####
 # EKS Cluster
 #####
 resource "aws_eks_cluster" "cluster" {
-  enabled_cluster_log_types = []
+  enabled_cluster_log_types = ["api", "audit","authenticator","controllerManager","scheduler"]
   name                      = "eks-module-test-cluster"
   role_arn                  = aws_iam_role.cluster.arn
-  version                   = "1.20"
+  version                   = "1.23"
 
   vpc_config {
-    subnet_ids              = data.aws_subnet_ids.all.ids
+    subnet_ids              = data.aws_subnets.all.ids
     security_group_ids      = []
     endpoint_private_access = "true"
     endpoint_public_access  = "true"
@@ -74,17 +77,21 @@ data "aws_launch_template" "cluster" {
 
 resource "aws_launch_template" "cluster" {
   image_id               = data.aws_ssm_parameter.cluster.value
-  instance_type          = "t3.medium"
+  instance_type          = "c5.2xlarge"
   name                   = "eks-launch-template-test"
   update_default_version = true
 
-  key_name = "eks-test"
+  key_name = "ec2-user"
+
+  enclave_options {
+    enabled = true
+  }
 
   block_device_mappings {
     device_name = "/dev/sda1"
 
     ebs {
-      volume_size = 20
+      volume_size = 40
     }
   }
 
@@ -92,8 +99,7 @@ resource "aws_launch_template" "cluster" {
     resource_type = "instance"
 
     tags = {
-      Name                        = "eks-node-group-instance-name"
-      "kubernetes.io/cluster/eks" = "owned"
+      Name                        = "eks-launch-template-test"
     }
   }
 
@@ -108,7 +114,7 @@ module "eks-node-group" {
 
   cluster_name = aws_eks_cluster.cluster.id
 
-  subnet_ids = data.aws_subnet_ids.all.ids
+  subnet_ids = data.aws_subnets.all.ids
 
   desired_size = 1
   min_size     = 1
@@ -129,4 +135,16 @@ module "eks-node-group" {
   }
 
   depends_on = [data.aws_launch_template.cluster]
+}
+
+output "name" {
+  value = aws_eks_cluster.cluster.name
+}
+
+output "endpoint" {
+  value = aws_eks_cluster.cluster.endpoint
+}
+
+output "kubeconfig-certificate-authority-data" {
+  value = aws_eks_cluster.cluster.certificate_authority.0.data
 }
